@@ -1,0 +1,19 @@
+(:~ this is a one line comment 
+: changed to multiple lines
+: one more line
+:)
+i: INT = 5
+j: INT = 7
+i
+j
+i + j
+i * j
+i + j * 3
+i * j + 3
+xdmp:eval
+q: INT = 3
+r: INT = 5
+xdmp:eval
+
+
+

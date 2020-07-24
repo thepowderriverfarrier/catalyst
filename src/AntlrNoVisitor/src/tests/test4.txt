@@ -1,0 +1,62 @@
+
+(:
+ : Module Name: FSC IMM Module
+ :
+ : Date: 2/18/2020
+ :
+ : Proprietary Extensions: MarkLogic
+ :
+ : Module Overview: This module implements end points for fscImm documents
+ :)
+
+module namespace fscImm = "http://marklogic.com/rest-api/resource/fscImm";
+
+import module namespace edl       = "http://marklogic.com/util/entityDocumentLibrary" at "/ext/util/entityDocumentLibrary.xqy";
+import module namespace fscImmLib = "http://marklogic.com/catalyst/lib/fscImmLib"     at "/ext/catalyst/lib/fscImmLib.xqy";
+
+
+(:~
+ Search across fscImm documents. Supports multiple query parameters, pagination, and sorting. 
+ The default sort is by national_stock_number_federal_supply_classification, descending; and 
+ the default returned result set is 1-10.
+
+ $context     - Request headers
+ $params      - URL parameters
+ @return      - Paginated and sorted fscImm documents
+ @queryParams -
+	national_stock_number_federal_supply_classification : national_stock_number_federal_supply_classification"
+	integrated_material_management                      : integrated_material_management
+	title                                               : title
+	searchText                                          : free search text on title
+:)
+
+xdmp:eval;
+xdmp:value;
+testphrase
+
+doc("catalog.xml")/catalog/product[99]
+doc("prices.xml")//priceList[@effDate eq '2006-11-15']
+product[position( ) > 1]
+doc("catalog.xml")/catalog/product/*[position( ) < 3]
+doc("prices.xml")//priceList[@effDate > '2006-11-15']
+product[name = "Floppy Sun Hat"]
+product[number < 500]
+product[@dept = "ACC"]
+product[desc]
+product[@dept]
+product[@dept]/number
+
+
+
+
+
+
+declare variable $intervalMins  := 1;
+
+declare function fscImm:get(
+	$context as map:map,
+	$params  as map:map
+) as document-node()* {
+	fscImmLib:getDocs($context, $params)
+};
+

@@ -1,0 +1,132 @@
+xquery version "1.0-ml";
+
+(:
+ : Module Name: DLS Create Retention Rules Task
+ :
+ : Date: 1/21/2019
+ :
+ : Proprietary Extensions: MarkLogic
+ :
+ : Module Overview: This module creates a scheduled task to create DLS retention 
+ :                  rules for versioned entities
+ :
+ : Grade Config File: /src/main/ml-config/tasks/dlsCreateRetentionRulesTask.json
+ :)
+
+declare namespace dls-crr-task = "http://marklogic.com/catalyst/tasks/dlsCreateRetentionRule";
+
+import module namespace admin = "http://marklogic.com/xdmp/admin"                 at "/MarkLogic/admin.xqy";
+import module namespace dls   = "http://marklogic.com/xdmp/dls"                   at "/MarkLogic/dls.xqy";
+import module namespace edl   = "http://marklogic.com/util/entityDocumentLibrary" at "/ext/util/entityDocumentLibrary.xqy";
+import module namespace trace = "http://marklogic.com/gradle/traceEvents"         at "/ext/config/traceEventsConfig.xqy";
+
+declare namespace group = "http://marklogic.com/xdmp/group";
+
+declare option xdmp:mapping "false";
+
+declare variable $taskPath      := "/ext/catalyst/tasks/dlsCreateRetentionRules.xqy";
+declare variable $taskContentDb := "usmc-tdp-content";
+declare variable $taskModulesDb := "usmc-tdp-modules";
+declare variable $intervalMins  := 1;
+
+(:~
+ : Creates the scheduled task if it does not already exist
+ :
+ : @param $interval - interval in seconds
+ : @return          - empty sequence
+ :)
+declare function dls-crr-task:create-scheduled-task(
+    $interval as xs:integer
+) {
+  xdmp:spawn-function(
+        function() {
+            let $_ := xdmp:trace($trace:TRACE-SCHED-TASKS, "Create DLS Create Retention Rule Task Function")
+
+            let $config   := admin:get-configuration()
+            let $groupId  := admin:group-get-id($config, "Default")
+            let $tasks    := admin:group-get-scheduled-tasks($config, $groupId)
+            let $updated  := fn:false()
+
+            (: grab the task, if it exists :)
+            let $dlsTask := $tasks[group:task-path/text() eq $taskPath][1]
+
+            (: add the task if it doesn't exist :)
+            let $addTask :=
+                if (fn:exists($dlsTask)) then ()
+                else
+                    let $newTask := 
+                        admin:group-minutely-scheduled-task(
+                            $taskPath, "/", $interval,
+                            xdmp:database($taskContentDb),
+                            xdmp:database($taskModulesDb),
+                            xdmp:user("admin"),
+                            0, "normal"
+                        )
+                    let $newConfig := admin:group-add-scheduled-task($config, $groupId, $newTask)
+                    return (
+                        xdmp:set($config, $newConfig),
+                        xdmp:set($updated, fn:true())
+                    )
+
+            return
+                if ($updated) then (
+                    admin:save-configuration($config),
+                    xdmp:commit()
+                ) else ()
+        },
+        <options xmlns="xdmp:eval">
+            <transaction-mode>update</transaction-mode>
+        </options>
+    )
+};
+
+(: code block below will run every minute if the this task has been created :)
+
+(:~
+ : Creates a dls retention rule for the entity if it does not exist
+ : TODO: Make sure the following exist:
+ : TODO: http://marklogic.com/xdmp/privileges/dls-user priviledge
+ : TODO: http://marklogic.com/xdmp/privileges/dls-admin priviledge
+ : TODO: dls-user role
+ : TODO: indexes dateTime:created and unsignedLong:version-id (should be created automatically with database create)
+ :) 
+(: create the scheduled task if it doesn't exist :)
+let $_       := dls-crr-task:create-scheduled-task($intervalMins)
+let $results := map:map()
+let $_       :=
+    let $versionedEntities := $edl:REVISION-HISTORY-ENTITIES
+    return
+        for $entity in map:keys($versionedEntities)
+        return
+            (: TODO: if false, and rule exists, should we delete it? :)
+            if (map:get($versionedEntities, $entity) eq fn:false()) then
+                map:put($results, $entity, "Not currently versioned")
+            else
+                (: rule already exists, do nothing :)
+                if (fn:exists(dls:retention-rules($entity))) then 
+                    map:put($results, $entity, "Rule already exists")
+                (: create the rule :)
+                else
+                    let $directory := "/" || $entity || "/"
+                    return (
+                        map:put($results, $entity, "New rule created"),
+                        xdmp:invoke-function(
+                            function() {
+                                dls:retention-rule-insert(
+                                    dls:retention-rule(
+                                        $entity, "Retention rule for " || $entity,
+                                        (), (), (), cts:directory-query($directory, "infinity")
+                                    )
+                                )
+                            },
+                            <options xmlns="xdmp:eval">
+                                <prevent-deadlocks>true</prevent-deadlocks>
+                            </options>
+                        )
+                    )
+
+return (
+    xdmp:trace($trace:TRACE-SCHED-TASKS, "DLS Create Retention Rule, latest status for versioned entities: "),
+    xdmp:trace($trace:TRACE-SCHED-TASKS, xdmp:to-json($results))
+)
+
